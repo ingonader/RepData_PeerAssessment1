@@ -1,20 +1,226 @@
 # Reproducible Research: Peer Assessment 1
 
+## Prerequisites
+
+The data used for this analysis was originally downloaded from [https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2Factivity.zip](https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2Factivity.zip). The following script assumes that the downloaded data file is named `activity.zip` and resides in the current R working directory. 
 
 ## Loading and preprocessing the data
 
+The following chunk unzips the data file and loads the data into the variable `dat.all`. It includes a comment that I used to set the working directory the first time I run the script on my local machine.
 
+Additionally, it also adds a new variable `dateposix` which transforms the string variable `date` into a POSIX format.
+
+```{r data.loading}
+## setwd("C:/data-sync/coursera/data-scientist-05-reproducible-research/assignment/RepData_PeerAssessment1")
+
+## unzip the file
+unzip(zipfile="activity.zip")
+dat.all <- read.csv("activity.csv", stringsAsFactors=FALSE)
+dat.all$dateposix <- as.POSIXct(strptime(dat.all$date, format="%Y-%m-%d"))
+```
+
+After loading, the data looks like this:
+
+
+```{r data.inspect2}
+head(dat.all)
+tail(dat.all)
+set.seed(42)
+dat.all[sort(sample(1:nrow(dat.all), size=6)),]
+```
 
 ## What is mean total number of steps taken per day?
 
+To answer this question, we first have to calculate the sum of steps for each day. We do this using the `tapply()` function. Note that we exclude missing values, as specified in the instructions to this assignment.
 
+```{r steps.per.day}
+steps.per.day <- tapply(dat.all$steps, dat.all$dateposix, sum, na.rm=TRUE)
+head(steps.per.day)
+```
+
+We can visualize this data by generating a histogram, using the `hist()` function.
+
+```{r hist, fig.height=4, fig.width=8, fig.cap="Histogram"}
+hist(steps.per.day, col="blue", nclass=20,
+     main="Histogram of Steps per Day", 
+     xlab="Steps per day",
+     las=1)
+```
+
+Then we can easily calculate the mean and the median over this sum:
+
+```{r mean}
+(steps.mean <- mean(steps.per.day))
+```
+
+```{r median}
+(steps.median <- median(steps.per.day))
+```
+
+So, according to this analysis, the subject in question has made a mean number of `r steps.mean` steps per day, but the median number of steps is `r steps.median`. This (as well as the high number of zeros and very low numbers seen in the histogram) indicate that the data is skewed -- the mean is probably not the best way of expressing the central tendency. (Or, that we shouldn't have used the sum when there are missing values -- see below).
 
 ## What is the average daily activity pattern?
 
+To answer this question according to the assignment instructions, we first calculate the mean number of steps over all days for each interval. Despite not being explicitly mentioned in the assignment instructions, the missing values are removed from the following analysis. 
 
+```{r activity.pattern}
+steps.per.interval <- tapply(dat.all$steps, dat.all$interval, mean, na.rm=TRUE)
+head(steps.per.interval)
+```
+
+We then plot the time series of the mean daily activity pattern. We use the `names()` function to retrieve the interval number.
+
+```{r activity.time.series, fig.height=4, fig.width=10}
+plot(steps.per.interval ~ names(steps.per.interval), type="l", lwd=2,
+     main="Mean daily activity pattern", 
+     xlab="Interval number",
+     ylab="Mean number of steps") 
+```
+
+Next, we want to find the interval with the maximum number of steps in this mean daily activity pattern.
+
+```{r max.steps}
+wch.max <- which(steps.per.interval == max(steps.per.interval))
+(max.steps <- steps.per.interval[wch.max])
+(max.steps.interval <- names(max.steps))
+```
+
+The interval with the maximum number of steps is interval number `r max.steps.interval`, where the subject in question made `r max.steps` steps, on average.
 
 ## Imputing missing values
 
+### Quasi-Imputation
+
+As a first proxy to what the imputed data could look like, we can just omit using the `sum()` function. Instead, we can just use the mean and multiply it with the length of the corresponding vector. This is technically the same as imputing the missing values with the mean.
+
+```{r}
+steps.per.day <- tapply(dat.all$steps, dat.all$dateposix, function(i) mean(i, na.rm=TRUE) * length(i))
+head(steps.per.day)
+```
+
+We can again plot a histogram:
+
+```{r hist.quasi.impute, fig.height=4, fig.width=8, fig.cap="Histogram"}
+hist(steps.per.day, col="blue", nclass=20,
+     main="Histogram of Steps per Day after Quasi-Imputation", 
+     xlab="Steps per day",
+     las=1)
+```
+
+And we can also calculate mean and median of the quasi-imputed data:
+
+```{r mean.quasi.impute}
+(steps.mean <- mean(steps.per.day, na.rm=TRUE))
+```
+
+```{r median.quasi.impute}
+(steps.median <- median(steps.per.day, na.rm=TRUE))
+```
+
+Already with this quasi-imputation, the data looks much less skewed.
+
+### A little more sophisticated two-step imputation
+
+In the following chunk, a new data set `dat.all.impute` is created by copying the original data set. Then, the missing values are imputed by using the mean activity pattern from above, as a (very) rough approximation.
+
+```{r}
+## create a new data set that is identical to the old one:
+dat.all.impute <- dat.all
+
+## find out where the missing values are:
+wch.impute <- which(is.na(dat.all.impute$steps))
+
+## which is the interval for which the value is missing:
+wch.interval <- dat.all[wch.impute, "interval"]
+
+## get the average number of steps for that interval
+## (has to use as character to use the names() element!)
+## and use these values to impute:
+dat.all.impute$steps[wch.impute] <- steps.per.interval[as.character(wch.interval)]
+
+##
+sum(is.na(dat.all.impute$steps))
+```
+
+After that, the number of missing values for the `steps` variable is zero -- There are no missing values left after imputation.
+
+Just to make sure, we can check how big the correlation of the imputed data is with the real data, of course only comparing the imputations that don't actually happen, as we need non-missing real data to calculate the correlation.
+
+```{r}
+## calculate the imputation for all values (not just the missing ones):
+steps.impute.all <- steps.per.interval[as.character(dat.all$interval)]
+
+## correlate with real data:
+cor(steps.impute.all, dat.all$steps, use="complete.obs")
+```
+
+To see if the data now looks differently, We can again compute the steps per day. For computing the sum, we can now omit the `na.rm=TRUE` parameter, as there are no missing values in the data:
+
+```{r steps.per.day.impute}
+steps.per.day <- tapply(dat.all.impute$steps, dat.all$dateposix, sum)
+head(steps.per.day)
+```
+We can again plot a histogram:
+
+```{r hist.impute, fig.height=4, fig.width=8, fig.cap="Histogram"}
+hist(steps.per.day, col="blue", nclass=20,
+     main="Histogram of Steps per Day after Imputation", 
+     xlab="Steps per day",
+     las=1)
+```
+
+And we can also calculate mean and median of the imputed data:
+
+```{r mean.impute}
+(steps.mean <- mean(steps.per.day))
+```
+
+```{r median.impute}
+(steps.median <- median(steps.per.day))
+```
+
+So, according to this analysis, the subject in question has made a mean number of `r steps.mean` steps per day, and the median number of steps is `r steps.median`. The median is pretty close to the mean, and also the histogram suggests that the data is much less skewed after imputation.
 
 
 ## Are there differences in activity patterns between weekdays and weekends?
+
+To answer this question, first we create two additional variables: The day of the week `weekday` (which we don't need here, but it might come in handy for other analyses), and the `daytype`, which is either *weekend* or *weekday*. Just for the sake of completeness, we add those two new variables both to the original and the imputed dataset. Note that we have to change the locale for the script to run in different locales, as the `weekdays()` function will return locale-specific strings.
+
+```{r}
+## set the locale, so that the weekdays are always in English
+Sys.setlocale(category="LC_TIME", locale="US")
+
+## make two new variables: weekday and daytype
+dat.all.impute$weekday <- weekdays(dat.all.impute$dateposix, abbreviate = TRUE)
+dat.all.impute$daytype <- ifelse(dat.all.impute$weekday %in% c("Sat", "Sun"), "weekend", "weekday")
+
+## also add them to the original dataset:
+dat.all$weekday <- weekdays(dat.all$dateposix, abbreviate = TRUE)
+dat.all$daytype <- ifelse(dat.all$weekday %in% c("Sat", "Sun"), "weekend", "weekday")
+```
+
+After that, we can answer the question of whether the activity patterns are different for weekdays and weekends.
+
+For that, we compute the mean number of steps per interval and per type of day:
+
+```{r activity.pattern.weekday}
+steps.per.interval.wd <- tapply(dat.all.impute$steps, list(dat.all.impute$interval, dat.all.impute$daytype), mean)
+head(steps.per.interval.wd)
+```
+Since we need the data in long format (and not in wide format, as returned by `tapply()`) for plotting it with the `lattice` package (or, at least, I do, because I think there is a way to do that with some kind of formula syntax to do that), we reshape the data using the `melt()` function in the ´reshape2` package:
+
+```{r}
+library(reshape2)
+dat.plot <- melt(steps.per.interval.wd)
+names(dat.plot) <- c("interval", "daytype", "steps")
+head(dat.plot)
+```
+
+Now we can easily plot it with the `xyplot()` function to compare the activity patterns:
+
+```{r, fig.height=8, fig.width=10} 
+library(lattice)
+xyplot(steps ~ interval | daytype, data=dat.plot, type="l", aspect=0.4)
+```
+
+That's it... So long, and thanks for all the fish!
